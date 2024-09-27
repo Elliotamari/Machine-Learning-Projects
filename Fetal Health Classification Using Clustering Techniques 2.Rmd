@@ -1,0 +1,270 @@
+---
+title: "Untitled"
+author: "MSHTSA009"
+date: "2024-09-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. Load the dataset
+```{r }
+library(readxl)
+library(dplyr)
+library(arules)
+library(arulesViz)
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+
+# Load the dataset
+cad_data <- read_excel("C:/Users/ellio/Downloads/CAD dataset.xlsx", sheet = "Sheet 1 - Table 1")
+
+# View the structure of the dataset
+str(cad_data)
+
+# Check for missing values
+sum(is.na(cad_data))
+
+```
+
+
+2. Exploratory Data Analysis
+```{r}
+# Visualizing distributions of continuous variables
+ggplot(cad_data, aes(x = Age)) +
+  geom_histogram(binwidth = 5, fill = "blue", alpha = 0.7) +
+  labs(title = "Age Distribution", x = "Age", y = "Count")
+
+ggplot(cad_data, aes(x = BMI)) +
+  geom_histogram(binwidth = 1, fill = "green", alpha = 0.7) +
+  labs(title = "BMI Distribution", x = "BMI", y = "Count")
+
+ggplot(cad_data, aes(x = BP)) +
+  geom_histogram(binwidth = 10, fill = "orange", alpha = 0.7) +
+  labs(title = "BP Distribution", x = "Blood Pressure", y = "Count")
+
+# Bar plots for categorical variables
+ggplot(cad_data, aes(x = Sex)) +
+  geom_bar(fill = "purple", alpha = 0.7) +
+  labs(title = "Sex Distribution", x = "Sex", y = "Count")
+
+ggplot(cad_data, aes(x = Obesity)) +
+  geom_bar(fill = "red", alpha = 0.7) +
+  labs(title = "Obesity Distribution", x = "Obesity", y = "Count")
+
+# Correlation heatmap for continuous variables
+continuous_vars <- cad_data %>% select_if(is.numeric)
+corr_matrix <- cor(continuous_vars, use = "complete.obs")
+corrplot(corr_matrix, method = "color", tl.cex = 0.7)
+
+# Boxplots of continuous variables based on CAD (Cath)
+ggplot(cad_data, aes(x = as.factor(Cath), y = Age, fill = as.factor(Cath))) +
+  geom_boxplot() +
+  labs(title = "Age vs CAD Status", x = "CAD Status (Cath)", y = "Age")
+
+ggplot(cad_data, aes(x = as.factor(Cath), y = BMI, fill = as.factor(Cath))) +
+  geom_boxplot() +
+  labs(title = "BMI vs CAD Status", x = "CAD Status (Cath)", y = "BMI")
+
+ggplot(cad_data, aes(x = as.factor(Cath), y = BP, fill = as.factor(Cath))) +
+  geom_boxplot() +
+  labs(title = "Blood Pressure vs CAD Status", x = "CAD Status (Cath)", y = "BP")
+
+```
+
+
+3. Data Cleaning and Transformation:
+```{r}
+# Correcting the 'Sex' column (typo "Fmale" to "Female")
+cad_data$Sex <- ifelse(cad_data$Sex == "Fmale", "Female", cad_data$Sex)
+
+# Convert all categorical columns into factors
+categorical_cols <- sapply(cad_data, is.character)
+cad_data[categorical_cols] <- lapply(cad_data[categorical_cols], as.factor)
+
+```
+
+
+4. Feature Engineering:
+```{r}
+cad_data <- cad_data %>%
+  mutate(
+    # Binning Age into three categories: "<40", "40-60", "60+"
+    Age = cut(Age, breaks = c(0, 40, 60, Inf), labels = c("<40", "40-60", "60+")),
+    
+    # Binning BMI and BP using the same approach as before
+    BMI = cut(BMI, breaks = c(0, 18.5, 24.9, 29.9, 40), labels = c("Underweight", "Normal", "Overweight", "Obese")),
+    
+    BP = cut(BP, breaks = c(0, 120, 140, 180, 250), labels = c("Normal", "Pre-HTN", "HTN-Stage 1", "HTN-Stage 2"))
+  )
+```
+
+
+5. Convert the Dataset to Transactions for Association Rule Mining:
+```{r}
+# Select only factor variables for association rule mining
+cad_data_factors <- cad_data %>% select_if(is.factor)
+
+# Convert dataset to transactions
+cad_transactions <- as(cad_data_factors, "transactions")
+cad_transactions
+
+# View summary of transactions
+summary(cad_transactions)
+
+```
+
+
+#Item frequency plot
+```{r}
+# Adjust the size of the plotting window to avoid constriction
+par(oma=c(1,1,1,1))  # Adjust margins if needed
+
+# Plot the top 40 items with absolute frequency using a single color (e.g., "steelblue")
+itemFrequencyPlot(
+  cad_transactions, 
+  topN = 30,  # Top 40 items
+  col = "steelblue",  # Use one color for all bars (e.g., "steelblue")
+  main = 'Absolute Item Frequency Plot (Top 30 Items)', 
+  type = "absolute", 
+  ylab = "Item Frequency (Absolute)", 
+  cex.names = 0.8,  # Adjust the size of the item labels to avoid overlap
+  horiz = FALSE  # Keep vertical bars, but change to TRUE for horizontal bars if needed
+)
+```
+
+
+
+#Association Rule Mining with Apriori
+```{r}
+rules <- apriori(
+  cad_transactions, 
+  parameter = list(support = 0.03, confidence = 0.8, minlen = 2, maxlen = 10), 
+  appearance = list(rhs = c("Cath=Cad", "Cath=Normal"), default = "lhs")
+)
+```
+
+
+
+
+```{r}
+# Remove redundant rules
+rules <- rules[!is.redundant(rules)]
+
+# Inspect the top 10 rules sorted by lift
+inspect(head(sort(rules, by = "lift"), 10))
+
+# Summary of the rules generated
+summary(rules)
+```
+
+```{r}
+#cad_rules_sorted <- sort(rules, by = "lift")
+
+# Visualize the top 10 rules using a scatter plot
+plot(rules, method = "scatterplot", measure = c("support", "confidence"), shading = "lift")
+
+# Visualize the top 10 rules using a graph (limited to best 10)
+plot(rules, method = "graph", control = list(max = 10, layout = "stress"))
+
+# Grouped matrix plot for better grouping of rules
+plot(rules, method = "grouped")
+
+subRules2<-head(rules, n=10, by="lift")
+plot(subRules2, method="paracoord")
+```
+Classification
+```{r}
+library(arules)
+library(rCBA)
+
+# Classification using the Apriori rules
+predictions <- rCBA::classification(cad_data_factors, rules)
+
+# View classification table
+table(predictions)
+
+# Calculate the accuracy of classification before pruning
+accuracy_before_pruning <- sum(as.character(cad_data_factors$Cath) == as.character(predictions), na.rm = TRUE) / length(predictions)
+print(paste("Accuracy before Pruning:", round(accuracy_before_pruning * 100, 2), "%"))
+
+# Pruning the rules using method "m2cba"
+pruned_apriori_rules <- rCBA::pruning(cad_data_factors, rules, method = "m2cba", parallel = FALSE)
+
+# Classification using pruned Apriori rules
+pruned_predictions <- rCBA::classification(cad_data_factors, pruned_apriori_rules)
+
+# View classification table after pruning
+table(pruned_predictions)
+
+# Calculate the accuracy of classification after pruning
+accuracy_after_pruning <- sum(as.character(cad_data_factors$Cath) == as.character(pruned_predictions), na.rm = TRUE) / length(pruned_predictions)
+print(paste("Accuracy after Pruning:", round(accuracy_after_pruning * 100, 2), "%"))
+```
+
+#Association Rule Mining with FP-Growth
+```{r }
+# Load necessary libraries
+library(arules)
+library(rCBA)
+
+# Apply the FP-Growth algorithm with minimum support and confidence
+Frules <- rCBA::fpgrowth(
+  cad_transactions, 
+  support = 0.03,   # Minimum support threshold
+  confidence = 0.8,  # Minimum confidence threshold         # Limit to a maximum of 2 items per rule
+  consequent = "Cath",  # Predict CAD status (Cath column)
+  parallel = FALSE
+)
+
+# Remove redundant rules
+Frules <- Frules[!is.redundant(rules)]
+
+# Inspect the top 10 rules sorted by lift
+inspect(head(sort(Frules, by = "lift"), 10))
+```
+
+```{r }
+# Visualize the top 10 rules using a scatter plot
+plot(Frules, method = "scatterplot", measure = c("support", "confidence"), shading = "lift")
+
+# Visualize the top 10 rules using a graph (limited to best 10)
+plot(Frules, method = "graph", control = list(max = 10, layout = "stress"))
+
+# Grouped matrix plot for better grouping of rules
+plot(Frules, method = "grouped")
+
+subRules2<-head(Frules, n=10, by="lift")
+plot(subRules2, method="paracoord")
+```
+
+Classiffication
+```{r}
+# Perform classification using the rules generated by FP-Growth
+predictions <- rCBA::classification(cad_data_factors, Frules)
+
+# View the classification table to assess predictions
+table(predictions)
+
+# Calculate the accuracy of the classification
+accuracy <- sum(as.character(cad_data_factors$Cath) == as.character(predictions), na.rm = TRUE) / length(predictions)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+
+# Prune the rules using method "m2cba"
+prunedRules <- rCBA::pruning(cad_data_factors, Frules, method = "m2cba", parallel = FALSE)
+
+# Perform classification again with pruned rules
+pruned_predictions <- rCBA::classification(cad_data_factors, prunedRules)
+
+# View the classification table for pruned rules
+table(pruned_predictions)
+
+# Calculate the accuracy with pruned rules
+pruned_accuracy <- sum(as.character(cad_data_factors$Cath) == as.character(pruned_predictions), na.rm = TRUE) / length(pruned_predictions)
+print(paste("Pruned Rules Accuracy:", round(pruned_accuracy * 100, 2), "%"))
+```
+
+

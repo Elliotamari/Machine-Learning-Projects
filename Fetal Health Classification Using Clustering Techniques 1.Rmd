@@ -1,0 +1,445 @@
+---
+title: "Untitled"
+author: "MSHTSA009"
+date: "2024-09-03"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(ggcorrplot)
+library(reshape2)
+
+# Load the dataset
+fetal_health_df <- read.csv("C:/Users/ellio/Downloads/fetal_health.csv", sep = ";")
+str(fetal_health_df)
+
+# Step 1: Check for missing values
+sum(is.na(fetal_health_df))
+
+# Step 2: Calculate Descriptive Statistics
+desc_stats <- data.frame(
+  Min = apply(fetal_health_df, 2, min), # minimum
+  Med = apply(fetal_health_df, 2, median), # median
+  Mean = apply(fetal_health_df, 2, mean), # mean
+  SD = apply(fetal_health_df, 2, sd), # Standard deviation
+  Max = apply(fetal_health_df, 2, max) # Maximum
+)
+head(desc_stats)
+
+# Step 3: Remove duplicates
+fetal_health_df <- fetal_health_df[!duplicated(fetal_health_df), ]
+
+
+
+# Standardize the data
+scaled_df <- scale(fetal_health_df)
+
+# Convert scaled_df to a data frame for visualization
+scaled_df <- as.data.frame(scaled_df)
+```
+
+
+
+
+```{r}
+# Step 6: Histogram plots with updated ggplot2 syntax
+histograms <- list()
+
+# Generate histograms for each column in the dataset
+for (i in 1:ncol(scaled_df)) {
+  plot <- ggplot(scaled_df, aes(x = .data[[names(scaled_df)[i]]])) +  # Corrected aesthetic
+    geom_histogram(bins = 30, fill = 'blue', color = 'black', alpha = 0.7) +
+    geom_density(alpha = 0.2, fill = 'red') +
+    ggtitle(paste("Distribution of", names(scaled_df)[i])) +
+    theme_minimal()
+  
+  histograms[[i]] <- plot
+}
+
+# Arrange histograms in a grid
+do.call("grid.arrange", c(histograms, ncol = 4))
+
+# Step 7: Compute correlation matrix
+cor_matrix <- cor(scaled_df)
+
+# Melt the correlation matrix to long format for ggplot2
+meltedcor <- melt(cor_matrix)
+
+# Plot the correlation matrix using ggplot2
+ggplot(data = meltedcor, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile(color = "white") + 
+  scale_fill_gradient2(low = "red", high = "blue", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                       name="Correlation") + 
+  theme_minimal() + 
+  geom_text(aes(Var1, Var2, label = round(value, 2)), color = "black", size = 4) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 10, hjust = 1)) +
+  coord_fixed() +
+  labs(title = "Correlation Matrix with Labels", x = "", y = "")
+
+# Step 8: Visualize Data using Boxplots
+# Add an ID column to the scaled data (to differentiate between rows)
+scaled_df$id <- 1:nrow(scaled_df)
+
+# Melt the scaled data into long format
+scaled_df_long <- reshape2::melt(scaled_df, id.vars = "id")
+
+# Create a boxplot using ggplot2 with uniform color for all variables
+ggplot(scaled_df_long, aes(x = variable, y = value)) +
+  geom_boxplot(outlier.colour = "red", outlier.shape = 16, outlier.size = 2, fill = "lightblue") +  # Set boxplot fill color to light blue
+  stat_summary(fun.min = min, geom = "errorbar", aes(ymin = ..y.., ymax = ..y..), 
+               width = 0.75, color = "blue", size = 1) +  # Min (Q0) line
+  stat_summary(fun.max = max, geom = "errorbar", aes(ymin = ..y.., ymax = ..y..), 
+               width = 0.75, color = "blue", size = 1) + # Max (Q4) line
+  labs(title = "Boxplot of Scaled Data with Q0 (Min) and Q4 (Max)", x = "Variables", y = "Values") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        plot.title = element_text(hjust = 0.5, size = 16, face = "bold")) +
+  guides(fill = FALSE)  # Remove legend as it’s unnecessary for boxplots
+```
+
+
+
+# Step 4: Dimensionality Reduction
+```{r}
+library(factoextra)
+
+# Step 4: Perform PCA (Principal Component Analysis) on the scaled data
+pca_result <- prcomp(scaled_df, center = TRUE, scale. = TRUE)
+
+# Summary of PCA to see explained variance
+summary(pca_result)
+
+# Create a new data frame with the principal components for further analysis
+pca_df <- as.data.frame(pca_result$x)
+
+data_for_clustering <- pca_df[, 1:2]  # Using the first two principal components
+
+```
+
+
+# K-Means Clustering
+```{r}
+# Elbow method
+fviz_nbclust(scaled_df, kmeans, method = "wss") +
+  geom_vline(xintercept = 3, linetype = 2) +
+  labs(title = "Elbow Method for K-Means", x = "Number of Clusters", y = "Total Within Sum of Squares")
+
+# Silhouette analysis
+fviz_nbclust(scaled_df, kmeans, method = "silhouette") +
+  labs(title = "Silhouette Analysis for K-Means", x = "Number of Clusters", y = "Average Silhouette Width")
+```
+
+
+# Step 3: Perform K-Means Clustering
+```{r}
+# Optimal k = 3
+set.seed(123)  
+kmeans_result <- kmeans(data_for_clustering, centers = 3, nstart = 25)
+
+# Step 4: Visualize the clusters
+fviz_cluster(kmeans_result, data = data_for_clustering, 
+             geom = "point", ellipse = TRUE, 
+             main = "") +
+  theme_minimal()
+
+
+```
+
+```{r}
+# Step 5: Add cluster assignments to the data for further analysis
+pca_df$Cluster <- as.factor(kmeans_result$cluster)
+
+# Visualize the clusters based on the first two principal components
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  labs(title = "", x = "PC1", y = "PC2") +
+  theme_minimal()
+
+```
+
+
+```{r}
+# Load necessary libraries
+library(cluster)
+library(factoextra)
+
+# Calculate the Silhouette scores for K-Means clustering
+silhouette_kmeans <- silhouette(kmeans_result$cluster, dist(data_for_clustering[,-ncol(data_for_clustering)]))
+
+# Calculate the average Silhouette width
+avg_silhouette_kmeans <- mean(silhouette_kmeans[, 3])
+cat("Average Silhouette Score (K-Means):", avg_silhouette_kmeans, "\n")
+
+# Plot the Silhouette analysis
+fviz_silhouette(silhouette_kmeans)
+```
+
+
+
+# K-Medoids clustering
+```{r}
+# Load necessary libraries for K-Medoids clustering
+library(cluster)  # For K-Medoids (PAM) clustering
+library(factoextra)  # For visualization
+
+# Elbow method to find the optimal number of clusters for K-Medoids
+fviz_nbclust(data_for_clustering, pam, method = "wss") +
+      geom_vline(xintercept = 3, linetype = 2)
+  labs(title = "Elbow Method for Finding Optimal Clusters (K-Medoids)", x = "Number of Clusters", y = "Total Within Sum of Squares")
+
+# Step 2: Determine optimal number of clusters using Silhouette Analysis for K-Medoids
+fviz_nbclust(data_for_clustering, pam, method = "silhouette") +
+  labs(title = "Silhouette Analysis for Finding Optimal Clusters (K-Medoids)", x = "Number of Clusters", y = "Average Silhouette Width")
+
+```
+
+
+```{r}
+# Step 3: Perform K-Medoids Clustering (K = 3 based on the previous results)
+set.seed(123)  # Set seed for reproducibility
+kmedoids_result <- pam(data_for_clustering, k = 3)
+
+# Step 4: Visualize the K-Medoids clusters
+fviz_cluster(kmedoids_result, data = data_for_clustering, 
+             geom = "point", ellipse = TRUE, 
+             main = "") +
+  theme_minimal()
+```
+
+```{r}
+# Step 5: Add K-Medoids cluster assignments to the PCA data for further analysis
+pca_df$KMedoids_Cluster <- as.factor(kmedoids_result$clustering)
+
+# Visualize the K-Medoids clusters based on the first two principal components
+ggplot(pca_df, aes(x = PC1, y = PC2, color = KMedoids_Cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  labs(title = "K-Medoids Clustering (PCA - First Two Principal Components)", x = "PC1", y = "PC2") +
+  theme_minimal()
+```
+
+
+```{r}
+# Load necessary libraries
+library(cluster)
+library(factoextra)
+
+# Calculate the Silhouette scores for K-Means clustering
+silhouette_kmeans <- silhouette(kmedoids_result$cluster, dist(data_for_clustering[,-ncol(data_for_clustering)]))
+
+# Calculate the average Silhouette width
+avg_silhouette_kmeans <- mean(silhouette_kmeans[, 3])
+cat("Average Silhouette Score (K-Means):", avg_silhouette_kmeans, "\n")
+
+# Plot the Silhouette analysis
+fviz_silhouette(silhouette_kmeans)
+```
+
+
+
+# For DBSCAN algorithm
+```{r}
+# Load necessary libraries for DBSCAN clustering
+library(dbscan)  # For DBSCAN algorithm
+library(factoextra)  # For visualization
+
+# Step 1: Perform DBSCAN
+# Choose the eps and minPts based on domain knowledge or trial and error.
+set.seed(123)  # Set seed for reproducibility
+
+
+# Step 1: Plot the kNN distance plot
+# Set k = minPts (usually minPts = 4 or 5)
+k <- 5
+kNNdistplot(data_for_clustering, k = k)
+
+# Step 2: Add a horizontal line to help identify the "elbow"
+abline(h = 0.5, col = "red", lty = 2)  # You can adjust this based on visual inspection
+
+```
+
+```{r}
+dbscan_result <- dbscan::dbscan(data_for_clustering, eps = 0.6, minPts = 5)
+```
+
+
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = DBSCAN_Cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("0" = "black", "1" = "red", "2" = "green", "3" = "blue", "4" = "purple", "5" = "pink")) +
+  labs(title = "DBSCAN Clustering (PCA - First Two Principal Components)", x = "PC1", y = "PC2") +
+  theme_minimal()
+```
+
+
+
+```{r}
+# Step 2: Visualize the DBSCAN clusters
+fviz_cluster(dbscan_result, data = data_for_clustering, geom = "point", 
+             stand = FALSE, ellipse = FALSE, show.clust.cent = FALSE, 
+             main = "DBSCAN Clustering Results") +
+  theme_minimal()
+
+
+```
+
+
+
+```{r}
+# Calculate Silhouette scores for DBSCAN clustering
+silhouette_dbscan <- silhouette(dbscan_result$cluster, dist(data_for_clustering))
+
+# Plot silhouette analysis
+fviz_silhouette(silhouette_dbscan)
+```
+
+
+# Step 2: Hierarchical Clustering with different linkages
+
+```{r}
+# Compute the distance matrix on the selected PCA components
+dist_matrix_pca <- dist(data_for_clustering, method = "euclidean")
+
+```
+
+
+```{r cars}
+# Load necessary libraries
+library(cluster)
+library(factoextra)
+
+# Single Linkage
+hc_pca_single <- hclust(dist_matrix_pca, method = "single")
+
+# Complete Linkage
+hc_pca_complete <- hclust(dist_matrix_pca, method = "complete")
+
+# Average Linkage
+hc_pca_average <- hclust(dist_matrix_pca, method = "average")
+
+# Enhanced plotting of dendrograms
+
+# 1. Complete Linkage Dendrogram
+plot(hc_pca_complete, main = "Dendrogram - Complete Linkage (PCA)", 
+     xlab = "Observations", sub = "", cex = 0.8, lwd = 2)
+rect.hclust(hc_pca_complete, k = 3, border = c("red", "green", "blue"))
+
+
+# 2. Average Linkage Dendrogram
+plot(hc_pca_average, main = "Dendrogram - Average Linkage (PCA)", 
+     xlab = "Observations", sub = "", cex = 0.8, lwd = 2)
+rect.hclust(hc_pca_average, k = 3, border = c("red", "green", "blue"))
+
+# 3. Single Linkage Dendrogram
+plot(hc_pca_single, main = "Dendrogram - Single Linkage (PCA)", 
+     xlab = "Observations", sub = "", cex = 0.8, lwd = 2)
+rect.hclust(hc_pca_single, k = 3, border = c("red", "green", "blue"))
+
+cut_clusters_pca_complete <- cutree(hc_pca_complete, k = 3)
+cut_clusters_pca_average <- cutree(hc_pca_average, k = 3)
+cut_clusters_pca_single <- cutree(hc_pca_single, k = 3)
+
+
+```
+
+
+
+
+
+```{r}
+# Load necessary library for visualization
+library(factoextra)
+
+# Visualize clusters for Complete Linkage
+fviz_cluster(list(data = data_for_clustering, cluster = cut_clusters_pca_complete), 
+             geom = "point", ellipse = TRUE, 
+             main = "PCA - Complete Linkage Clustering", 
+             ggtheme = theme_minimal())
+
+# Visualize clusters for Average Linkage
+fviz_cluster(list(data = data_for_clustering, cluster = cut_clusters_pca_average), 
+             geom = "point", ellipse = TRUE, 
+             main = "PCA - Average Linkage Clustering", 
+             ggtheme = theme_minimal())
+
+# Visualize clusters for Single Linkage
+fviz_cluster(list(data = data_for_clustering, cluster = cut_clusters_pca_single), 
+             geom = "point", ellipse = TRUE, 
+             main = "PCA - Single Linkage Clustering", 
+             ggtheme = theme_minimal())
+
+```
+```{r}
+# Calculate Silhouette Scores
+
+# Silhouette scores for Complete Linkage
+silhouette_complete <- silhouette(cut_clusters_pca_complete, dist_matrix_pca)
+  ggtitle("Silhouette Plot - Complete Linkage")
+
+# Silhouette scores for Average Linkage
+silhouette_average <- silhouette(cut_clusters_pca_average, dist_matrix_pca)
+  ggtitle("Silhouette Plot - Average Linkage")
+
+# Silhouette scores for Single Linkage
+silhouette_single <- silhouette(cut_clusters_pca_single, dist_matrix_pca)
+  ggtitle("Silhouette Plot - Single Linkage")
+
+fviz_silhouette(silhouette_complete) 
+fviz_silhouette(silhouette_average)  
+fviz_silhouette(silhouette_single) 
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,183 @@
+---
+title: "TM"
+author: "MSHTSA009"
+date: "2024-05-24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+#a Step a: Randomly split the data into training and testing sets by applying an 80-20 split
+# Load the necessary libraries
+library(e1071)
+library(caret)
+library(pROC)
+
+# Load the data
+data <- read.csv("C:/Users/ellio/Downloads/heart_failure_clinical_records_dataset.csv")
+# Convert DEATH_EVENT to a factor
+data$DEATH_EVENT <- as.factor(data$DEATH_EVENT)
+print(levels(data$DEATH_EVENT))  # Check the levels of DEATH_EVENT
+
+# Split the data into training and testing sets
+set.seed(1)
+trainIndex <- createDataPartition(data$DEATH_EVENT, p = 0.8, list = FALSE)
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#b Step b: Build a support vector machine using a radial kernel function with cost=0.1 and gamma=0.1. Report the classification accuracy, recall, specificity, F1 score, and ROC AUC.
+
+# Train SVM with radial kernel
+svm_model <- svm(DEATH_EVENT ~ ., data = trainData, kernel = "radial", cost = 0.1, gamma = 0.1, probability = TRUE)
+
+# Predict on the test data
+pred <- predict(svm_model, testData, probability = TRUE)
+pred_prob <- attr(pred, "probabilities")[, 2]
+
+# Convert predictions to factors with the same levels as DEATH_EVENT
+pred <- factor(pred, levels = levels(testData$DEATH_EVENT))
+
+# Calculate metrics
+conf_matrix <- confusionMatrix(pred, testData$DEATH_EVENT)
+accuracy <- conf_matrix$overall['Accuracy']
+recall <- conf_matrix$byClass['Recall']
+specificity <- conf_matrix$byClass['Specificity']
+f1 <- conf_matrix$byClass['F1']
+roc_auc <- roc(testData$DEATH_EVENT, pred_prob)$auc
+
+# Print the metrics
+print(paste("Accuracy:", accuracy))
+print(paste("Recall:", recall))
+print(paste("Specificity:", specificity))
+print(paste("F1 Score:", f1))
+print(paste("ROC AUC:", roc_auc))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Step c: Repeat steps (a) and (b) 100 times and report the average of each of these metrics over the 100 runs. Also, provide a boxplot for each metric’s 100 values.
+# Repeat the process 100 times
+results <- data.frame(Accuracy = numeric(100), Recall = numeric(100), Specificity = numeric(100), F1 = numeric(100), ROC_AUC = numeric(100))
+
+for (i in 1:100) {
+  set.seed(i)
+  trainIndex <- createDataPartition(data$DEATH_EVENT, p = 0.8, list = FALSE)
+  trainData <- data[trainIndex, ]
+  testData <- data[-trainIndex, ]
+  
+  svm_model <- svm(DEATH_EVENT ~ ., data = trainData, kernel = "radial", cost = 0.1, gamma = 0.1, probability = TRUE)
+  pred <- predict(svm_model, testData, probability = TRUE)
+  pred_prob <- attr(pred, "probabilities")[, 2]
+  
+  pred <- factor(pred, levels = levels(testData$DEATH_EVENT))
+  
+  conf_matrix <- confusionMatrix(pred, testData$DEATH_EVENT)
+  results$Accuracy[i] <- conf_matrix$overall['Accuracy']
+  results$Recall[i] <- conf_matrix$byClass['Recall']
+  results$Specificity[i] <- conf_matrix$byClass['Specificity']
+  results$F1[i] <- conf_matrix$byClass['F1']
+  results$ROC_AUC[i] <- roc(testData$DEATH_EVENT, pred_prob)$auc
+}
+
+# Report the average of each metric over the 100 runs
+avg_metrics <- colMeans(results)
+print(avg_metrics)
+
+# Provide a boxplot for each metric’s 100 values
+boxplot(results, main="SVM Metrics Distribution", xlab="Metrics", ylab="Values")
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Step d: Repeat steps (a), (b) and (c) with different cost and gamma parameters. You are expected to explore at least 3 different values for each hyperparameter. Report your findings using appropriate tables and/or graphs.
+
+# Repeat the process with different cost and gamma parameters
+cost_values <- c(0.01, 0.1, 1)
+gamma_values <- c(0.01, 0.1, 1)
+grid_results <- expand.grid(Cost = cost_values, Gamma = gamma_values, Accuracy = numeric(0), Recall = numeric(0), Specificity = numeric(0), F1 = numeric(0), ROC_AUC = numeric(0))
+
+for (cost in cost_values) {
+  for (gamma in gamma_values) {
+    for (i in 1:100) {
+      set.seed(i)
+      trainIndex <- createDataPartition(data$DEATH_EVENT, p = 0.8, list = FALSE)
+      trainData <- data[trainIndex, ]
+      testData <- data[-trainIndex, ]
+      
+      svm_model <- svm(DEATH_EVENT ~ ., data = trainData, kernel = "radial", cost = cost, gamma = gamma, probability = TRUE)
+      pred <- predict(svm_model, testData, probability = TRUE)
+      pred_prob <- attr(pred, "probabilities")[, 2]
+      
+      pred <- factor(pred, levels = levels(testData$DEATH_EVENT))
+      
+      conf_matrix <- confusionMatrix(pred, testData$DEATH_EVENT)
+      grid_results <- rbind(grid_results, data.frame(Cost = cost, Gamma = gamma, Accuracy = conf_matrix$overall['Accuracy'], Recall = conf_matrix$byClass['Recall'], Specificity = conf_matrix$byClass['Specificity'], F1 = conf_matrix$byClass['F1'], ROC_AUC = roc(testData$DEATH_EVENT, pred_prob)$auc))
+    }
+  }
+}
+
+
+# Summarize the results
+summary_results <- aggregate(. ~ Cost + Gamma, data = grid_results, mean)
+print(summary_results)
+
+#Plot results
+library(ggplot2)
+
+ggplot(summary_results, aes(x = Cost, y = Accuracy, color = factor(Gamma))) +
+  geom_line(size = 1.5) +     # Adjust line width here
+  geom_point(size = 3) +      # Adjust point size here
+  labs(title = "", 
+       x = "Cost", y = "Accuracy",
+       size = 19) +             # Adjust text size here
+  scale_color_discrete(name = "Gamma")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+#Step e: Tune the cost and gamma parameters using grid search on the training data and report your best model parameters. Test your best model performance on the test data.
+
+# Tune the cost and gamma parameters using grid search
+set.seed(1)
+tune_result <- tune(svm, DEATH_EVENT ~ ., data = trainData, kernel = "radial", ranges = list(cost = cost_values, gamma = gamma_values), probability = TRUE)
+
+# Report the best model parameters
+best_model <- tune_result$best.model
+best_parameters <- tune_result$best.parameters
+print(best_parameters)
+
+
+# Test the best model performance on the test data
+pred_best <- predict(best_model, testData, probability = TRUE)
+pred_prob_best <- attr(pred_best, "probabilities")[, 2]
+
+# Convert predictions to factors with the same levels as DEATH_EVENT
+pred_best <- factor(pred_best, levels = levels(testData$DEATH_EVENT))
+
+# Calculate metrics for the best model
+conf_matrix_best <- confusionMatrix(pred_best, testData$DEATH_EVENT)
+accuracy_best <- conf_matrix_best$overall['Accuracy']
+recall_best <- conf_matrix_best$byClass['Recall']
+specificity_best <- conf_matrix_best$byClass['Specificity']
+f1_best <- conf_matrix_best$byClass['F1']
+roc_auc_best <- roc(testData$DEATH_EVENT, pred_prob_best)$auc
+
+# Print the metrics for the best model
+print(paste("Best Model Accuracy:", accuracy_best))
+print(paste("Best Model Recall:", recall_best))
+print(paste("Best Model Specificity:", specificity_best))
+print(paste("Best Model F1 Score:", f1_best))
+print(paste("Best Model ROC AUC:", roc_auc_best))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Step f: Compare findings from the grid search and repeated runscomparison <- data.frame(
+# Compare findings from the grid search and repeated runs
+comparison <- data.frame(
+  Metric = c("Accuracy", "Recall", "Specificity", "F1", "ROC_AUC"),
+  Grid_Search = c(accuracy_best, recall_best, specificity_best, f1_best, roc_auc_best), 
+  Repeated_Runs = avg_metrics)
+print(comparison)
+```
+

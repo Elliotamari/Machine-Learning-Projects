@@ -1,0 +1,581 @@
+---
+title: "MSHTSA009"
+author: "MSHTSA009"
+date: "2024-05-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+# Load the libraries
+library(data.table)
+library(caret)
+library(dplyr)
+library(gridExtra)
+
+
+#Read the Data
+data <- read.csv("C:/Users/ellio/Downloads/online_shoppers_intention.csv", header = TRUE, stringsAsFactors = TRUE)
+
+#1. Inspect Data
+summary(data)
+sapply(data, function(x) sum(is.na(x)))
+
+#2. Encode Categorical Variables
+data$Revenue <- as.factor(data$Revenue)
+data$Weekend <- as.factor(data$Weekend)
+
+#3 Feature Exploration[Feature engineering and selection]
+# Data visualization using ggplot2 for violin and box plots
+plot1 <- ggplot(data, aes(x = as.factor(Revenue), y = Administrative)) +
+  geom_boxplot(fill = "skyblue") +
+  labs(title = "Box Plot of Administrative by Revenue", x = "Revenue", y = "Administrative")
+
+plot2 <- ggplot(data, aes(x = as.factor(Revenue), y = Informational)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Box Plot of Informational by Revenue", x = "Revenue", y = "Informational")
+
+plot3 <- ggplot(data, aes(x = as.factor(Revenue), y = ProductRelated)) +
+  geom_boxplot(fill = "lightpink") +
+  labs(title = "Box Plot of Product Related by Revenue", x = "Revenue", y = "ProductRelated")
+
+plot4 <- ggplot(data, aes(x = as.factor(Revenue), y = Administrative_Duration)) +
+  geom_boxplot(fill = "skyblue") +
+  labs(title = "Box Plot of Administrative Duration by Revenue", x = "Revenue", y = "Administrative Duration")
+
+plot5 <- ggplot(data, aes(x = as.factor(Revenue), y = Informational_Duration)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Box Plot of Informational Duration by Revenue", x = "Revenue", y = "Informational Duration")
+
+plot6 <- ggplot(data, aes(x = as.factor(Revenue), y = ProductRelated_Duration)) +
+  geom_boxplot(fill = "lightpink") +
+  labs(title = "Box Plot of Product Related Duration by Revenue", x = "Revenue", y = "Product Related Duration")
+
+# Arrange the plots in a grid
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, ncol = 3)
+
+
+# Set up the plots
+plot1 <- ggplot(data, aes(x = BounceRates)) +
+  geom_histogram(bins = 20, fill = "coral", color = "black") +
+  labs(title = "Distribution of Bounce Rates", x = "Bounce Rates", y = "Count") +
+  theme_minimal()
+
+plot2 <- ggplot(data, aes(x = ExitRates)) +
+  geom_histogram(bins = 20, fill = "lightblue", color = "black") +
+  labs(title = "Distribution of Exit Rates", x = "Exit Rates", y = "Count") +
+  theme_minimal()
+
+plot3 <- ggplot(data, aes(x = PageValues)) +
+  geom_histogram(bins = 20, fill = "lightgreen", color = "black") +
+  labs(title = "Distribution of Page Values", x = "Page Values", y = "Count") +
+  theme_minimal()
+
+# Arrange the plots in a single row
+grid.arrange(plot1, plot2, plot3, ncol = 3)
+
+data$Month <- factor(data$Month, levels = c('Jan','Feb','Mar','Apr','May','June','Jul','Aug','Sep','Oct','Nov','Dec'))
+
+# Plot 1: Revenue by Month
+plot1 <- ggplot(data, aes(x = Month, fill = as.factor(Revenue))) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("grey", "blue"), labels = c("Did not Purchase", "Purchased")) +
+  labs(title = "Revenue by Month", x = "Month", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(hjust = 0.5))
+
+# Plot 2: Revenue by Special Day
+plot2 <- ggplot(data, aes(x = as.factor(SpecialDay), fill = as.factor(Revenue))) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("grey", "blue"), labels = c("Did not Purchase", "Purchased")) +
+  labs(title = "Revenue by Special Day", x = "Special Day", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# Plot 3: Revenue by Visitor Type
+plot3 <- ggplot(data, aes(x = VisitorType, fill = as.factor(Revenue))) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("grey", "blue"), labels = c("Did not Purchase", "Purchased")) +
+  labs(title = "Revenue by Visitor Type", x = "Visitor Type", y = "Count") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+grid.arrange(plot1, plot2, plot3, nrow = 3)
+
+#4. Create dummy variables for 'Month' and 'VisitorType'              
+data <- data %>%
+  mutate(Month = as.factor(Month),
+         VisitorType = as.factor(VisitorType)) %>%
+  select(-Month, -VisitorType) %>%
+  bind_cols(model.matrix(~ Month + VisitorType - 1, data = data))
+
+str(data)
+
+
+#5. Splitting Data
+set.seed(123)  # For reproducibility
+index <- sample(1:nrow(data), 0.7 * nrow(data))
+trainData <- data[index, ]
+testData <- data[-index, ]
+
+#6. Scale Training Data and capture the scaled object
+# Scale numerical features
+numFeatures <- c("Administrative_Duration", "Informational_Duration", "ProductRelated_Duration",
+                 "BounceRates", "ExitRates", "PageValues")
+
+# Standardize training data
+scaled_train <- scale(trainData[numFeatures])
+trainData[numFeatures] <- scaled_train
+means <- attr(scaled_train, "scaled:center")  # Mean of each column from training set
+sds <- attr(scaled_train, "scaled:scale")    # SD of each column from training set
+
+# Apply the same scaling to the test data
+testData[numFeatures] <- scale(testData[numFeatures], center = means, scale = sds)
+#_______________________________________________________________________________
+# Modelling
+
+# 1. Logistic Regression
+# ~~Fit a Logistic Regression Model Using All Features
+logit_model <- glm(Revenue ~ ., data = trainData, family = "binomial")
+
+# Summary of the model
+summary(logit_model)
+
+# ~~Perform Variable Selection with L1-Regularization
+library(glmnet)
+
+# Prepare matrix for glmnet
+x <- model.matrix(Revenue ~ . - 1, data = trainData)  # Removing intercept
+y <- trainData$Revenue
+
+# Fit Lasso model
+lasso_model <- glmnet(x, y, family = "binomial", alpha = 1)  # alpha=1 for lasso
+
+# Plotting the coefficient shrinkage
+plot(lasso_model, xvar = "lambda", label = TRUE)
+
+# Fit logistic regression with L1 regularization
+cv_logit_l1 <- cv.glmnet(x, y, family = "binomial", alpha = 1)  # alpha=1 for LASSO
+# Plot to choose lambda
+plot(cv_logit_l1)
+
+# Best lambda
+best_lambda <- cv_logit_l1$lambda.min
+print(best_lambda)
+
+# Fit model using the best lambda
+final_logit_l1 <- glmnet(x, y, family = "binomial", alpha = 1, lambda = best_lambda)
+
+#2. Classification Tree
+library(rpart)
+library(rpart.plot)
+
+# Fit classification tree
+tree_model <- rpart(Revenue ~ ., data = trainData, method = "class")
+
+# Perform cross-validation to determine the optimal complexity parameter
+cv_tree <- rpart::rpart.control( cp = 0.001)
+fit_cv_tree <- rpart(Revenue ~ ., data = trainData, method = "class", control = cv_tree)
+
+# Get the optimal tree size based on cross-validation
+printcp(fit_cv_tree)
+
+# Prune the tree based on optimal complexity parameter
+optimal_cp <- fit_cv_tree$cptable[which.min(fit_cv_tree$cptable[, "xerror"]), "CP"]
+pruned_tree <- prune(tree_model, cp = optimal_cp)
+
+# Plot the pruned tree
+rpart.plot(pruned_tree, main = "Pruned Classification Tree")
+
+
+#3 3. Random Forest
+# Fit random forest
+library(randomForest)
+library(pdp)
+
+rf_model <- randomForest(Revenue ~ ., data = trainData, ntree = 500, mtry = sqrt(ncol(trainData)))
+
+# Summary of the model
+print(rf_model)
+plot(rf_model, main = "Variable Importance")
+pdp_obj <- partial(rf_model, pred.var = "PageValues", grid.resolution = 20)
+plot(pdp_obj, main = "Partial Dependence Plot for PageValues", xlab = "PageValues", ylab = "Partial Dependence")
+
+# Ensure Revenue is a factor
+trainData$Revenue <- as.factor(trainData$Revenue)
+testData$Revenue <- as.factor(testData$Revenue)
+
+# Generate a ggplot with updated text sizes
+pdp_plot <- ggplot(pdp_data, aes(x = PageValues, y = yhat)) +
+  geom_line(color = "blue", linewidth = 1.5) +  # Use 'linewidth' for line thickness
+  geom_point(color = "red") +
+  labs(title = "Partial Dependence Plot for PageValues",
+       x = "Page Values",
+       y = "Effect on Predicted Probability of Purchase") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20),  # Larger plot title
+    axis.title = element_text(size = 16),  # Larger axis titles
+    axis.text = element_text(size = 14)  # Larger axis text
+  )
+
+# Display the plot
+print(pdp_plot)
+
+
+#4. Gradient Boosted Trees
+library(gbm)
+library(caret)
+#a. Gradient Boosted Trees using GBM
+set.seed(123)  # for reproducibility
+trainData$Revenue <- as.numeric(trainData$Revenue) - 1  # Converts factors to 0 and 1
+# Train the GBM model
+gbm_model <- gbm(Revenue ~ ., data = trainData, distribution = "bernoulli",
+                 n.trees = 500, interaction.depth = 4, shrinkage = 0.01, n.minobsinnode = 10, cv.folds = 5, )
+
+# Summary of variable importance
+summary(gbm_model)
+
+# For variable importance
+importance <- summary(gbm_model)
+# Partial dependence plot for a significant variable
+plot(gbm_model, i = "PageValues")
+
+
+#XtreemeBoost
+sapply(trainData, class)
+# Ensuring all factor variables are appropriately converted
+trainData_processed <- model.matrix(~ . - 1, data = trainData)  # '-1' to avoid intercept
+testData_processed <- model.matrix(~ . - 1, data = testData)
+
+
+labels_train <- as.numeric(as.factor(trainData$Revenue)) - 1
+labels_test <- as.numeric(as.factor(testData$Revenue)) - 1
+
+train_matrix <- xgb.DMatrix(data = as.matrix(trainData_processed), label = labels_train)
+test_matrix <- xgb.DMatrix(data = as.matrix(testData_processed), label = labels_test)
+
+
+# XGBoost model parameters
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = 0.01,
+  max_depth = 6,
+  subsample = 0.75,
+  colsample_bytree = 0.75
+)
+
+# Training the model
+xgb_model <- xgb.train(
+  params = params,
+  data = train_matrix,
+  nrounds = 1000,
+  watchlist = list(eval = test_matrix, train = train_matrix),
+  early_stopping_rounds = 50,
+  verbose = 1
+)
+
+# Check training progress
+print(xgb_model$evaluation_log)
+
+
+# Variable importance
+importance_matrix <- xgb.importance(feature_names = colnames(trainData_processed), model = xgb_model)
+print(importance_matrix)
+xgb.plot.importance(importance_matrix)
+
+
+library(pdp)
+# Partial Dependence Plot for 'PageValues'
+pdp_obj <- pdp::partial(xgb_model, pred.var = "PageValues", train = trainData_processed, grid.resolution = 10, plot = TRUE, plot.engine = "ggplot")
+print(pdp_obj)
+
+
+#3 Model Evaluation
+# Logistic Regression
+library(caret)
+set.seed(123)  # Set seed for reproducibility
+split <- createDataPartition(data$Revenue, p = 0.7, list = FALSE)
+trainData <- data[split,]
+testData <- data[-split,]
+
+# Load necessary libraries
+library(pROC)
+library(PRROC)
+library(MLmetrics)
+# Ensure actuals and predictions are properly formatted as factors
+actuals_factor <- factor(testData$Revenue, levels = c(FALSE, TRUE))
+
+# Predict probabilities and make predictions based on threshold
+logit_probs <- predict(logit_model, testData, type = "response")
+logit_preds <- ifelse(logit_probs > 0.5, TRUE, FALSE)
+logit_preds_factor <- factor(logit_preds, levels = c(FALSE, TRUE))
+
+# Calculate various performance metrics
+logit_accuracy <- mean(logit_preds_factor == actuals_factor)
+logit_precision <- posPredValue(logit_preds_factor, actuals_factor, positive = "TRUE")
+logit_recall <- sensitivity(logit_preds_factor, actuals_factor, positive = "TRUE")
+logit_F1 <- (2 * logit_precision * logit_recall) / (logit_precision + logit_recall)
+logit_specificity <- specificity(logit_preds_factor, actuals_factor, negative = "TRUE")
+
+# ROC AUC
+logit_roc <- roc(response = actuals_factor, predictor = logit_probs)
+logit_auc <- auc(logit_roc)
+# PR AUC
+
+logit_pr <- pr.curve(scores.class0 = logit_probs, weights.class0 = actuals_factor == "TRUE", curve = TRUE)
+logit_pr_auc <- logit_pr$auc.integral
+
+# Load necessary library to handle confusion matrix
+library(caret)
+
+# Create the confusion matrix from factors
+conf_matrix <- confusionMatrix(logit_preds_factor, actuals_factor)
+
+# Extract the four elements of the confusion matrix as numeric to handle large numbers
+TP <- as.numeric(conf_matrix$table[2,2])  # True Positives
+TN <- as.numeric(conf_matrix$table[1,1])  # True Negatives
+FP <- as.numeric(conf_matrix$table[1,2])  # False Positives
+FN <- as.numeric(conf_matrix$table[2,1])  # False Negatives
+
+# Calculate Matthews Correlation Coefficient (MCC) using numeric types to prevent overflow
+mcc_numerator <- (TP * TN) - (FP * FN)
+mcc_denominator <- sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+
+# Check for zero denominator to avoid division by zero
+if (mcc_denominator == 0) {
+  mcc_value <- 0  # MCC is 0 if the denominator is zero, indicating no predictive value
+} else {
+  mcc_value <- mcc_numerator / mcc_denominator
+}
+
+# Collect metrics
+logit_metrics <- c(Accuracy = logit_accuracy, Precision = logit_precision, F1 = logit_F1, Recall = logit_recall,
+                   Specificity = logit_specificity, ROC_AUC = logit_auc, PR_AUC = logit_pr_auc, MCC = mcc_value)
+
+logit_metrics
+
+#Classification tree
+# Load necessary libraries
+library(caret)
+library(pROC)
+library(PRROC)
+
+# Ensure actuals are properly formatted as factors
+actuals_factor <- factor(testData$Revenue, levels = c(FALSE, TRUE))
+
+# Predict with the classification tree model
+tree_preds <- predict(tree_model, testData, type = "class")
+tree_preds_factor <- factor(tree_preds, levels = c(FALSE, TRUE))
+
+# Calculate various performance metrics
+tree_accuracy <- mean(tree_preds_factor == actuals_factor)
+tree_precision <- posPredValue(tree_preds_factor, actuals_factor, positive = "TRUE")
+tree_recall <- sensitivity(tree_preds_factor, actuals_factor, positive = "TRUE")
+tree_F1 <- (2 * tree_precision * tree_recall) / (tree_precision + tree_recall)
+tree_specificity <- specificity(tree_preds_factor, actuals_factor, negative = "TRUE")
+
+# ROC AUC
+tree_roc <- roc(response = actuals_factor, predictor = as.numeric(tree_preds_factor))
+tree_auc <- auc(tree_roc)
+
+# PR AUC
+tree_pr <- pr.curve(scores.class0 = as.numeric(tree_preds_factor), weights.class0 = actuals_factor == "TRUE", curve = TRUE)
+tree_pr_auc <- tree_pr$auc.integral
+
+# Create the confusion matrix from factors
+conf_matrix_tree <- confusionMatrix(tree_preds_factor, actuals_factor)
+
+# Extract the four elements of the confusion matrix as numeric to handle large numbers
+TP <- as.numeric(conf_matrix_tree$table[2,2])  # True Positives
+TN <- as.numeric(conf_matrix_tree$table[1,1])  # True Negatives
+FP <- as.numeric(conf_matrix_tree$table[1,2])  # False Positives
+FN <- as.numeric(conf_matrix_tree$table[2,1])  # False Negatives
+
+# Calculate Matthews Correlation Coefficient (MCC) using numeric types to prevent overflow
+mcc_numerator <- (TP * TN) - (FP * FN)
+mcc_denominator <- sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+
+# Check for zero denominator to avoid division by zero
+if (mcc_denominator == 0) {
+  tree_mcc_value <- 0  # MCC is 0 if the denominator is zero, indicating no predictive value
+} else {
+  tree_mcc_value <- mcc_numerator / mcc_denominator
+}
+
+# Collect metrics
+tree_metrics <- c(Accuracy = tree_accuracy, Precision = tree_precision, F1 = tree_F1, Recall = tree_recall,
+                  Specificity = tree_specificity, ROC_AUC = tree_auc, PR_AUC = tree_pr_auc, MCC = tree_mcc_value)
+
+# Print metrics
+print(tree_metrics)
+
+#Random Forest
+# Load necessary libraries
+library(caret)
+library(pROC)
+library(PRROC)
+library(randomForest)
+
+# Ensure actuals are properly formatted as factors
+actuals_factor <- factor(testData$Revenue, levels = c(FALSE, TRUE))
+
+# Predict with the Random Forest model
+rf_probs <- predict(rf_model, testData, type = "prob")[,2]  # Get probabilities for the positive class
+rf_preds <- ifelse(rf_probs > 0.5, TRUE, FALSE)
+rf_preds_factor <- factor(rf_preds, levels = c(FALSE, TRUE))
+
+# Calculate various performance metrics
+rf_accuracy <- mean(rf_preds_factor == actuals_factor)
+rf_precision <- posPredValue(rf_preds_factor, actuals_factor, positive = "TRUE")
+rf_recall <- sensitivity(rf_preds_factor, actuals_factor, positive = "TRUE")
+rf_F1 <- (2 * rf_precision * rf_recall) / (rf_precision + rf_recall)
+rf_specificity <- specificity(rf_preds_factor, actuals_factor, negative = "TRUE")
+
+# ROC AUC
+rf_roc <- roc(response = actuals_factor, predictor = rf_probs)
+rf_auc <- auc(rf_roc)
+
+# PR AUC
+rf_pr <- pr.curve(scores.class0 = rf_probs, weights.class0 = actuals_factor == "TRUE", curve = TRUE)
+rf_pr_auc <- rf_pr$auc.integral
+
+# Create the confusion matrix from factors
+conf_matrix_rf <- confusionMatrix(rf_preds_factor, actuals_factor)
+
+# Extract the four elements of the confusion matrix as numeric to handle large numbers
+TP <- as.numeric(conf_matrix_rf$table[2,2])  # True Positives
+TN <- as.numeric(conf_matrix_rf$table[1,1])  # True Negatives
+FP <- as.numeric(conf_matrix_rf$table[1,2])  # False Positives
+FN <- as.numeric(conf_matrix_rf$table[2,1])  # False Negatives
+
+# Calculate Matthews Correlation Coefficient (MCC) using numeric types to prevent overflow
+mcc_numerator <- (TP * TN) - (FP * FN)
+mcc_denominator <- sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+
+# Check for zero denominator to avoid division by zero
+if (mcc_denominator == 0) {
+  rf_mcc_value <- 0  # MCC is 0 if the denominator is zero, indicating no predictive value
+} else {
+  rf_mcc_value <- mcc_numerator / mcc_denominator
+}
+
+# Collect metrics
+rf_metrics <- c(Accuracy = rf_accuracy, Precision = rf_precision, F1 = rf_F1, Recall = rf_recall,
+                Specificity = rf_specificity, ROC_AUC = rf_auc, PR_AUC = rf_pr_auc, MCC = rf_mcc_value)
+
+# Print metrics
+print(rf_metrics)
+
+#GBMMMMM
+# Load necessary libraries
+library(caret)
+library(pROC)
+library(PRROC)
+library(gbm)
+
+# Ensure actuals are properly formatted as factors
+actuals_factor <- factor(testData$Revenue, levels = c(FALSE, TRUE))
+
+# Predict probabilities and make predictions based on threshold for the GBM model
+# Ensure that gbm_model is the trained GBM model
+gbm_probs <- predict(gbm_model, testData, type = "response")
+gbm_preds <- ifelse(gbm_probs > 0.5, TRUE, FALSE)
+gbm_preds_factor <- factor(gbm_preds, levels = c(FALSE, TRUE))
+
+# Calculate various performance metrics
+gbm_accuracy <- mean(gbm_preds_factor == actuals_factor)
+gbm_precision <- posPredValue(gbm_preds_factor, actuals_factor, positive = "TRUE")
+gbm_recall <- sensitivity(gbm_preds_factor, actuals_factor, positive = "TRUE")
+gbm_F1 <- (2 * gbm_precision * gbm_recall) / (gbm_precision + gbm_recall)
+gbm_specificity <- specificity(gbm_preds_factor, actuals_factor, negative = "TRUE")
+
+# ROC AUC
+gbm_roc <- roc(response = actuals_factor, predictor = gbm_probs)
+gbm_auc <- auc(gbm_roc)
+
+# PR AUC
+gbm_pr <- pr.curve(scores.class0 = gbm_probs, weights.class0 = actuals_factor == "TRUE", curve = TRUE)
+gbm_pr_auc <- gbm_pr$auc.integral
+
+# Create the confusion matrix from factors
+conf_matrix_gbm <- confusionMatrix(gbm_preds_factor, actuals_factor)
+
+# Extract the four elements of the confusion matrix as numeric to handle large numbers
+TP <- as.numeric(conf_matrix_gbm$table[2,2])  # True Positives
+TN <- as.numeric(conf_matrix_gbm$table[1,1])  # True Negatives
+FP <- as.numeric(conf_matrix_gbm$table[1,2])  # False Positives
+FN <- as.numeric(conf_matrix_gbm$table[2,1])  # False Negatives
+
+# Calculate Matthews Correlation Coefficient (MCC) using numeric types to prevent overflow
+mcc_numerator <- (TP * TN) - (FP * FN)
+mcc_denominator <- sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+
+# Check for zero denominator to avoid division by zero
+if (mcc_denominator == 0) {
+  gbm_mcc_value <- 0  # MCC is 0 if the denominator is zero, indicating no predictive value
+} else {
+  gbm_mcc_value <- mcc_numerator / mcc_denominator
+}
+
+# Collect metrics
+gbm_metrics <- c(Accuracy = gbm_accuracy, Precision = gbm_precision, F1 = gbm_F1, Recall = gbm_recall,
+                 Specificity = gbm_specificity, ROC_AUC = gbm_auc, PR_AUC = gbm_pr_auc, MCC = gbm_mcc_value)
+
+# Print metrics
+print(gbm_metrics)
+
+
+#Plot
+
+# Predict probabilities for GBM model
+gbm_probs <- predict(gbm_model, testData, n.trees = gbm_model$gbm.call$best.trees, type = "response")
+
+# Calculate ROC curve for GBM model
+gbm_roc <- roc(response = actuals_factor, predictor = gbm_probs)
+
+# Plot the ROC curves together in a 2x2 plot
+par(mfrow = c(2, 2))
+
+# Logistic Regression ROC
+plot(logit_roc, col = "blue", main = "ROC Curves", lty = 1, cex.main = 0.8)
+
+# Classification Tree ROC
+plot(tree_roc, col = "red", main = "ROC Curves", lty = 2, cex.main = 0.8)
+
+# Random Forest ROC
+plot(rf_roc, col = "green", main = "ROC Curves", lty = 3, cex.main = 0.8)
+
+# GBM ROC
+plot(gbm_roc, col = "purple", main = "ROC Curves", lty = 4, cex.main = 0.8)
+
+# Add legend
+legend("bottomright", legend = c("Logistic Regression", "Classification Tree", "Random Forest", "GBM"), 
+       col = c("blue", "red", "green", "purple"), lty = c(1, 2, 3, 4), cex = 0.8)
+
+# Reset par to default settings
+par(mfrow = c(1, 1))
+
+# Plot all four ROC curves together in one plot
+plot(logit_roc, col = "blue", main = "ROC Curves", lty = 1, cex.main = 0.8)
+lines(tree_roc, col = "red", lty = 2)
+lines(rf_roc, col = "green", lty = 3)
+lines(gbm_roc, col = "purple", lty = 4)
+
+# Add legend
+legend("bottomright", legend = c("Logistic Regression", "Classification Tree", "Random Forest", "GBM"), 
+       col = c("blue", "red", "green", "purple"), lty = c(1, 2, 3, 4), cex = 0.8)
+
+
+
+
+```
+
